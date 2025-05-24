@@ -1,0 +1,71 @@
+import requests
+import csv
+import time
+from datetime import datetime
+import pyttsx3
+
+# === Configuration ===
+ESP32_URL = "http://IP_ADDRESS/gas"  # Replace with your ESP32 IP
+THRESHOLD = 700
+FILENAME = "File_Address"
+SPEAK_INTERVAL = 2  # Seconds between data checks
+
+# === Initialize Text-to-Speech Engine ===
+engine = pyttsx3.init()
+
+# Set a different voice (male/female, other language, etc.)
+voices = engine.getProperty('voices')
+
+# Print available voices
+print("Available voices:")
+for i, voice in enumerate(voices):
+    print(f"{i}: {voice.name} ({voice.languages})")
+
+# Choose a non-default voice if available (e.g., a female voice)
+# You can change the index to try different voices on your system
+try:
+    engine.setProperty('voice', voices[1].id)  # 0 is usually default
+except IndexError:
+    print("Voice index out of range. Using default voice.")
+
+# === CSV Setup ===
+with open(FILENAME, mode='w', newline='') as file:
+    writer = csv.writer(file)
+    writer.writerow(["Timestamp", "Gas Sensor Value"])
+
+# === Function to Speak Warning ===
+def speak_warning(gas_value):
+    message = f"Warning! Dangerous gas level detected: {gas_value}"
+    print("🔊 Speaking:", message)
+    engine.say(message)
+    engine.runAndWait()
+
+# === Main Loop to Fetch and Log Data ===
+while True:
+    try:
+        response = requests.get(ESP32_URL, timeout=5)
+        if response.status_code == 200:
+            line = response.text.strip()
+            if line.isdigit():
+                gas_value = int(line)
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Log to CSV
+                with open(FILENAME, mode='a', newline='') as file:
+                    writer = csv.writer(file)
+                    writer.writerow([timestamp, gas_value])
+
+                print(f"{timestamp} -> Gas Value: {gas_value}")
+
+                # Speak warning if threshold is crossed
+                if gas_value >= THRESHOLD:
+                    speak_warning(gas_value)
+            else:
+                print("Invalid data received:", line)
+        else:
+            print(f"Error {response.status_code}: Could not fetch data")
+
+    except Exception as e:
+        print("⚠️ Error:", e)
+
+    time.sleep(SPEAK_INTERVAL)
