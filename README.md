@@ -1,2 +1,2 @@
 # Industry_Safety_Device
-Industrial Safety Monitoring System  An IoT-based safety solution integrating gas sensors (MQ135, MQ2), flame detection via computer vision, and IR sensing using ESP32. 
+IoT-based system with gas sensors, flame detection (OpenCV), and IR sensing on ESP32. Sends real-time alerts via SMS and voice. Includes web server and relay control for devices like sprinklers or sirens. Powered via USB Type-C. A companion app is in progress. A main script runs Flask server, flame detection, and AI gas monitoring together.
