@@ -1,0 +1,145 @@
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <DHT.h>
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WebServer.h>  // For HTTP server
+
+// WiFi credentials
+const char* ssid = "WIFI NAME";
+const char* password = "WIFI PASSWORD";
+
+// Flask server (your laptop's IP)
+const char* serverURL = "http://IP_ADDRESS/gas_alert";
+
+// Pins
+#define DHTPIN 4
+#define DHTTYPE DHT11
+#define MQ135_PIN 34
+#define MQ2_PIN 39
+#define IR_PIN 14
+#define RELAY_PIN 23
+
+// OLED config
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+// Sensors
+DHT dht(DHTPIN, DHTTYPE);
+
+// Web server on port 80
+WebServer server(80);
+
+void handleMQ135() {
+  int mq135 = analogRead(MQ135_PIN);
+  server.send(200, "text/plain", String(mq135));
+}
+
+void handleMQ2() {
+  int mq2 = analogRead(MQ2_PIN);
+  server.send(200, "text/plain", String(mq2));
+}
+
+void handleDHT() {
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  String data = "{\"temperature\":" + String(temperature) + ",\"humidity\":" + String(humidity) + "}";
+  server.send(200, "application/json", data);
+}
+
+void handleRelay() {
+  String state = server.arg("state");
+  if (state == "on") {
+    digitalWrite(RELAY_PIN, LOW); // Relay ON
+    server.send(200, "text/plain", "Relay ON");
+  } else if (state == "off") {
+    digitalWrite(RELAY_PIN, HIGH); // Relay OFF
+    server.send(200, "text/plain", "Relay OFF");
+  } else {
+    server.send(400, "text/plain", "Invalid state");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+
+  // Pin setup
+  pinMode(IR_PIN, INPUT);
+  pinMode(RELAY_PIN, OUTPUT);
+  digitalWrite(RELAY_PIN, HIGH); // Relay off by default
+
+  // Sensor setup
+  dht.begin();
+
+  // OLED setup
+  if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    Serial.println("SSD1306 allocation failed");
+    while (true);
+  }
+  display.clearDisplay();
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
+
+  // WiFi setup
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to WiFi");
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("\nConnected! IP: " + WiFi.localIP().toString());
+
+  // HTTP server routes
+  server.on("/mq135", handleMQ135);
+  server.on("/mq2", handleMQ2);
+  server.on("/dht11", handleDHT);
+  server.on("/relay", handleRelay);
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  server.handleClient();  // Handle HTTP requests
+
+  float temperature = dht.readTemperature();
+  float humidity = dht.readHumidity();
+  int mq135 = analogRead(MQ135_PIN);
+  int mq2 = analogRead(MQ2_PIN);
+  int irValue = digitalRead(IR_PIN);
+
+  Serial.println("---- Sensor Readings ----");
+  Serial.printf("Temperature: %.1f°C | Humidity: %.1f%%\n", temperature, humidity);
+  Serial.printf("MQ-135: %d | MQ-2: %d | IR: %s\n", mq135, mq2, irValue ? "Detected" : "None");
+  Serial.println("-------------------------");
+
+  // OLED display
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.printf("Temp: %.1f C\n", temperature);
+  display.printf("Humidity: %.1f %%\n", humidity);
+  display.printf("MQ135: %d\n", mq135);
+  display.printf("MQ2: %d\n", mq2);
+  display.printf("IR: %s\n", irValue ? "Object" : "None");
+  display.display();
+
+  // IR relay control
+  digitalWrite(RELAY_PIN, irValue == HIGH ? LOW : HIGH);
+
+  // Gas alert to Flask server
+  if (mq135 > 600 || mq2 > 600) {
+    if (WiFi.status() == WL_CONNECTED) {
+      HTTPClient http;
+      http.begin(serverURL);
+      http.addHeader("Content-Type", "application/json");
+      String payload = "{\"mq135\":" + String(mq135) + ",\"mq2\":" + String(mq2) + "}";
+      int httpResponseCode = http.POST(payload);
+      Serial.println("Gas alert sent: " + String(httpResponseCode));
+      http.end();
+    }
+  }
+
+  delay(3000);
+}
